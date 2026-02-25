@@ -4,13 +4,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>就労支援管理システム - 個別支援計画君</title>
     
+    <!-- React & ReactDOM -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     
+    <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     
+    <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
 
     <style>
@@ -132,13 +136,24 @@
             plan: { periodStart: "", periodEnd: "", monitoringDate: "", userDesire: "", familyDesire: "", needs: "", longTermGoal: "", shortTermGoal: "", supportContent: "", staff: "", approver: "", explainDate: "" },
             monitoring: { date: "", interviewer: "", location: "", currentStatus: "", needs: "", anxiety: "", satisfaction: "", futureTasks: "", feedback: "" },
             termination: { date: "", goals: [{ id: 1, target: "", achievement: "", overall: "", satisfaction: "", nextOpinion: "" }, { id: 2, target: "", achievement: "", overall: "", satisfaction: "", nextOpinion: "" }] },
-            dailyRecords: [], interviewRecords: []
+            dailyRecords: [], interviewRecords: [],
+            summaryInfo: { nextDayNotes: "" } // 追加：引き継ぎ事項などのサマリー保存用
         });
 
         const mergeUserData = (loadedUser) => {
             const init = getInitialUserState();
             const mergedApp = { ...init.application, ...(loadedUser.application || {}), schedule: { ...init.application.schedule, ...((loadedUser.application && loadedUser.application.schedule) || {}) } };
-            const m = { ...init, ...loadedUser, application: mergedApp, assessment: { ...init.assessment, ...(loadedUser.assessment || {}) }, plan: { ...init.plan, ...(loadedUser.plan || {}) }, monitoring: { ...init.monitoring, ...(loadedUser.monitoring || {}) }, termination: { ...init.termination, ...(loadedUser.termination || {}) }, dailyRecords: loadedUser.dailyRecords || [], interviewRecords: loadedUser.interviewRecords || [] };
+            const m = { 
+                ...init, ...loadedUser, 
+                application: mergedApp, 
+                assessment: { ...init.assessment, ...(loadedUser.assessment || {}) }, 
+                plan: { ...init.plan, ...(loadedUser.plan || {}) }, 
+                monitoring: { ...init.monitoring, ...(loadedUser.monitoring || {}) }, 
+                termination: { ...init.termination, ...(loadedUser.termination || {}) }, 
+                dailyRecords: loadedUser.dailyRecords || [], 
+                interviewRecords: loadedUser.interviewRecords || [],
+                summaryInfo: { ...(init.summaryInfo || {}), ...(loadedUser.summaryInfo || {}) }
+            };
             m.status = determineStatus(m); return m;
         };
 
@@ -158,7 +173,7 @@
             return (<div className={`mb-4 p-4 rounded-md border flex items-start gap-3 shadow-sm ${alert.type === 'danger' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-yellow-50 border-yellow-200 text-yellow-800'}`}><Icon name="bell" className={`flex-shrink-0 ${alert.type === 'danger' ? 'text-red-500' : 'text-yellow-600'}`} /><div><div className="font-bold">期限の確認が必要です</div><div className="text-sm mt-1">{alert.message}（{dateLabel}: {date}）</div></div></div>);
         };
 
-        // --- 追加機能コンポーネント ---
+        // --- 職員情報管理 ---
         const StaffManagement = ({ staffs, setStaffs }) => {
             const [name, setName] = useState(""); const [role, setRole] = useState("");
             const addStaff = () => { if (!name) return; setStaffs([...staffs, { id: Date.now(), name, role }]); setName(""); setRole(""); };
@@ -188,6 +203,7 @@
             );
         };
 
+        // --- 作業一覧管理 ---
         const TaskManagement = ({ tasks, setTasks }) => {
             const [form, setForm] = useState({ name: '', level: '1', deadline: '', description: '' });
             const addTask = () => { if (!form.name) return; setTasks([...tasks, { id: Date.now(), ...form }]); setForm({ name: '', level: '1', deadline: '', description: '' }); };
@@ -219,6 +235,7 @@
             );
         };
 
+        // --- 利用者シフト管理 ---
         const UserShiftManagement = ({ users, userShifts, onShiftChange }) => {
             const [currentWeek, setCurrentWeek] = useState(new Date());
             const days = Array.from({length: 7}, (_, i) => { const d = new Date(currentWeek); d.setDate(d.getDate() - d.getDay() + i + 1); return d; });
@@ -269,6 +286,7 @@
             );
         };
 
+        // --- 職員配置シミュレーション ---
         const StaffShiftManagement = ({ staffs, users, userShifts, staffShifts, onShiftChange }) => {
             const [targetDate, setTargetDate] = useState(formatDateKey(new Date()));
             const dk = targetDate;
@@ -340,6 +358,7 @@
             );
         };
 
+        // --- 座席配置 ---
         const SeatManagement = ({ users, staffs, userShifts, staffShifts }) => {
             const [targetDate, setTargetDate] = useState(formatDateKey(new Date()));
             const dk = targetDate;
@@ -391,6 +410,7 @@
             );
         };
 
+        // --- 1日のスケジュール管理 ---
         const StaffScheduleManager = ({ staffs }) => {
             const [currentDate, setCurrentDate] = useState(new Date());
             const hours = Array.from({length: 10}, (_, i) => i + 9); 
@@ -440,30 +460,146 @@
         };
 
 
-        const SummaryView = ({ user }) => {
-            const { application, assessment, plan, monitoring, termination } = user;
+        // --- 要約情報ビュー (アップデート版) ---
+        const SummaryView = ({ user, onChange }) => {
+            const { application, assessment, plan, monitoring, termination, dailyRecords = [], interviewRecords = [] } = user;
             const monitoringAlert = checkDeadlineAlert(plan?.monitoringDate, monitoring?.date, "モニタリング");
             const terminationAlert = checkDeadlineAlert(plan?.periodEnd, termination?.date, "終了評価");
+            
+            const [isGenerating, setIsGenerating] = useState(false);
+
+            // 直近の記録を抽出
+            const recentDaily = [...dailyRecords].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0, 3);
+            const recentInterviews = [...interviewRecords].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0, 2);
+
             const InfoItem = ({ label, value, important = false }) => (<div className="mb-3"><div className={`text-xs font-bold mb-1 ${important ? 'text-red-600' : 'text-slate-500'}`}>{label} {important && <span className="text-xs bg-red-100 text-red-600 px-1 rounded ml-1">重要</span>}</div><div className={`text-sm ${value ? 'text-slate-800' : 'text-slate-400 italic'}`}>{value || "（情報なし）"}</div></div>);
+
+            const handleGenerateNotes = async () => {
+                if (recentDaily.length === 0) {
+                    alert("要約の元になる「日々の支援記録」がありません。");
+                    return;
+                }
+                setIsGenerating(true);
+                const apiKey = "";
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+                
+                const recordsText = recentDaily.map(r => `[${r.date}] 体調:${r.condition} 内容:${r.content}`).join('\n');
+                const userQuery = `以下の利用者の「日々の支援記録（直近）」から、翌日以降の支援担当者に向けた「重要な連絡事項」と「引き継ぎ内容」を要約して、箇条書きで分かりやすく抽出してください。\n\n【支援記録】\n${recordsText}`;
+                
+                const payload = {
+                    contents: [{ parts: [{ text: userQuery }] }],
+                    systemInstruction: { parts: [{ text: "あなたは障害福祉施設の経験豊富なサービス管理責任者です。簡潔で的確な引き継ぎ事項を作成します。" }] }
+                };
+
+                let retries = 5; let delay = 1000; let generatedText = "";
+                while (retries > 0) {
+                    try {
+                        const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+                        const result = await response.json();
+                        if (result.error) throw new Error(result.error.message);
+                        generatedText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                        break;
+                    } catch (e) {
+                        retries--;
+                        if (retries === 0) { alert("AIの生成に失敗しました。APIキーの有無などを確認してください。"); } 
+                        else { await new Promise(r => setTimeout(r, delay)); delay *= 2; }
+                    }
+                }
+                
+                if (generatedText) {
+                    onChange({ summaryInfo: { ...user.summaryInfo, nextDayNotes: generatedText.trim() } });
+                }
+                setIsGenerating(false);
+            };
+
             return (
                 <div className="animate-fade-in">
                     {monitoringAlert.isAlert && <AlertBanner alert={monitoringAlert} dateLabel="予定日" date={plan.monitoringDate} />}
                     {terminationAlert.isAlert && <AlertBanner alert={terminationAlert} dateLabel="計画終了日" date={plan.periodEnd} />}
+                    
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+                        {/* 左カラム */}
                         <div className="space-y-6">
                             <Card title="基本情報・緊急連絡先" className="border-l-4 border-l-blue-500">
                                 <div className="flex justify-between items-start mb-4"><div><h2 className="text-2xl font-bold text-slate-800">{application.applicantName} <span className="text-sm font-normal text-slate-500">({application.applicantNameKana})</span></h2><div className="flex gap-2 mt-1"><span className="text-sm bg-slate-100 px-2 py-0.5 rounded text-slate-600">{application.gender}</span><span className="text-sm bg-slate-100 px-2 py-0.5 rounded text-slate-600">{application.age}歳</span>{(application.disabilityType || []).map(t => (<span key={t} className="text-sm bg-blue-100 px-2 py-0.5 rounded text-blue-700">{t}</span>))}</div></div><div className="text-right"><div className="text-sm font-bold text-slate-500">障害等級</div><div className="text-lg">{application.disabilityGrade || "-"}</div></div></div>
                                 <div className="grid grid-cols-2 gap-4 bg-red-50 p-4 rounded-md border border-red-100 mb-4"><div><div className="text-xs font-bold text-red-700 mb-1">緊急連絡先</div><div className="font-bold text-slate-800">{assessment.emergencyContact.name} <span className="text-sm font-normal">({assessment.emergencyContact.relation})</span></div><div className="text-slate-700">{assessment.emergencyContact.tel}</div></div><div><div className="text-xs font-bold text-red-700 mb-1">診断名・病名</div><div className="font-bold text-slate-800">{assessment.medical.diagnosis || application.disabilityName || "（未記入）"}</div></div></div>
                                 <InfoItem label="通院先・主治医" value={`${assessment.medical.hospital} / ${assessment.medical.doctor}`} /><InfoItem label="服薬状況・管理" value={assessment.medical.medication} />
                             </Card>
-                            <Card title="特性・配慮事項 (Attention)" className="border-l-4 border-l-orange-400"><InfoItem label="調子を崩す前兆（サイン）" value={assessment.triggers} important /><InfoItem label="調子を崩した時の対処法" value={assessment.coping} important /><div className="my-4 border-t border-slate-100"></div><InfoItem label="得意なこと・強み" value={assessment.dailyLife.strengths || assessment.workHistory.map(w => w.content).join(", ")} /><InfoItem label="苦手なこと・課題" value={assessment.dailyLife.challenges} /><InfoItem label="コミュニケーションの特性" value={assessment.dailyLife.commSkill} /></Card>
+                            
+                            <Card title="特性・配慮事項 (Attention)" className="border-l-4 border-l-orange-400">
+                                <InfoItem label="調子を崩す前兆（サイン）" value={assessment.triggers} important />
+                                <InfoItem label="調子を崩した時の対処法" value={assessment.coping} important />
+                                <div className="my-4 border-t border-slate-100"></div>
+                                <InfoItem label="得意なこと・強み" value={assessment.dailyLife.strengths || assessment.workHistory.map(w => w.content).join(", ")} />
+                                <InfoItem label="苦手なこと・課題" value={assessment.dailyLife.challenges} />
+                                <InfoItem label="コミュニケーションの特性" value={assessment.dailyLife.commSkill} />
+                            </Card>
+
+                            <Card title="直近の面談記録 (抜粋)" className="border-l-4 border-l-pink-400">
+                                {recentInterviews.length > 0 ? (
+                                    <div className="space-y-4">
+                                        {recentInterviews.map(r => (
+                                            <div key={r.id} className="text-sm border-b pb-3 last:border-0 last:pb-0">
+                                                <div className="font-bold text-slate-700 flex items-center gap-2 mb-1">
+                                                    <Icon name="calendar-days" size={14} className="text-slate-400"/> {r.date} 
+                                                    <span className="text-xs font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded">対応: {r.interviewer}</span>
+                                                </div>
+                                                <div className="text-slate-600 line-clamp-3 pl-5 border-l-2 border-slate-200">{r.content}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="text-sm text-slate-400 py-2 text-center border border-dashed rounded bg-slate-50">面談記録がありません</div>
+                                )}
+                            </Card>
                         </div>
+
+                        {/* 右カラム */}
                         <div className="space-y-6">
-                            <Card title="支援目標・方針 (Goal)" className="border-l-4 border-l-green-500"><InfoItem label="本人の希望（将来の目標）" value={plan.userDesire || application.futureGoal} /><div className="bg-green-50 p-3 rounded mb-3"><InfoItem label="短期目標（〜6ヶ月）" value={plan.shortTermGoal} /></div><InfoItem label="長期目標（約1年）" value={plan.longTermGoal} /><InfoItem label="具体的な支援内容" value={plan.supportContent} /></Card>
+                            <Card title="翌日の連絡事項・引き継ぎ" className="border-l-4 border-l-red-500 bg-red-50/30">
+                                <div className="mb-3">
+                                    <button onClick={handleGenerateNotes} disabled={isGenerating} className="bg-purple-600 text-white text-xs px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-purple-700 disabled:opacity-50 transition-colors shadow-sm font-bold w-full justify-center">
+                                        <Icon name="sparkles" size={16} />
+                                        {isGenerating ? "AIが引き継ぎ事項を抽出中..." : "日々の記録からAIで連絡事項を作成"}
+                                    </button>
+                                </div>
+                                <TextArea 
+                                    rows={5} 
+                                    value={user.summaryInfo?.nextDayNotes || ""} 
+                                    onChange={e => onChange({ summaryInfo: { ...user.summaryInfo, nextDayNotes: e.target.value } })} 
+                                    placeholder="明日の支援で気をつけるべきこと、引き継ぎ事項などを入力してください。（上のボタンからAIでの自動生成も可能です）" 
+                                />
+                            </Card>
+
+                            <Card title="支援目標・方針 (Goal)" className="border-l-4 border-l-green-500">
+                                <InfoItem label="本人の希望（将来の目標）" value={plan.userDesire || application.futureGoal} />
+                                <div className="bg-green-50 p-3 rounded mb-3"><InfoItem label="短期目標（〜6ヶ月）" value={plan.shortTermGoal} /></div>
+                                <InfoItem label="長期目標（約1年）" value={plan.longTermGoal} />
+                                <InfoItem label="具体的な支援内容" value={plan.supportContent} />
+                            </Card>
+
                             <Card title="直近の状況・評価 (Status)" className="border-l-4 border-l-indigo-500">
                                  <div className="mb-4"><div className="text-xs font-bold text-slate-500 mb-1">直近のモニタリング ({monitoring.date || "実施なし"})</div><div className="bg-slate-50 p-3 rounded border border-slate-100"><div className="text-sm mb-2"><span className="font-bold">現状:</span> {monitoring.currentStatus || "記録なし"}</div><div className="text-sm mb-2"><span className="font-bold">満足度:</span> {monitoring.satisfaction || "-"}</div><div className="text-sm"><span className="font-bold">今後の課題:</span> {monitoring.futureTasks || "-"}</div></div></div>
                                 {termination.date && (<div className="mb-4"><div className="text-xs font-bold text-slate-500 mb-1">終了評価 ({termination.date})</div><div className="bg-slate-50 p-3 rounded border border-slate-100"><div className="text-sm">{termination.goals.map(g => g.overall).filter(o => o).join(" / ") || "全体評価の記述なし"}</div></div></div>)}
                                 <InfoItem label="事業所に望む支援" value={assessment.desiredSupport.detail || assessment.desiredSupport.items.join(", ")} />
+                            </Card>
+
+                            <Card title="直近の支援記録 (抜粋)" className="border-l-4 border-l-teal-500">
+                                {recentDaily.length > 0 ? (
+                                    <div className="space-y-4">
+                                        {recentDaily.map(r => (
+                                            <div key={r.id} className="text-sm border-b pb-3 last:border-0 last:pb-0">
+                                                <div className="font-bold text-slate-700 flex items-center gap-2 mb-1">
+                                                    <Icon name="file-text" size={14} className="text-slate-400"/> {r.date} 
+                                                    <span className={`text-xs font-bold px-2 py-0.5 rounded ${r.condition==='良好'?'bg-green-100 text-green-700':r.condition.includes('不調')?'bg-red-100 text-red-700':'bg-slate-100 text-slate-700'}`}>{r.condition}</span>
+                                                </div>
+                                                <div className="text-slate-600 line-clamp-3 pl-5 border-l-2 border-slate-200">{r.content}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="text-sm text-slate-400 py-2 text-center border border-dashed rounded bg-slate-50">支援記録がありません</div>
+                                )}
                             </Card>
                         </div>
                     </div>
@@ -659,6 +795,8 @@
             const [activeUser, setActiveUser] = useState(null);
             const [activeForm, setActiveForm] = useState("summary");
             const [deleteTarget, setDeleteTarget] = useState(null);
+            const [globalNotes, setGlobalNotes] = useState("");
+            const [isGeneratingGlobal, setIsGeneratingGlobal] = useState(false);
 
             useEffect(() => {
                 const ls = (k, def) => { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; };
@@ -669,6 +807,7 @@
                 setTasks(ls("knowbe_tasks", [{id: 1, name: "箱折り", level: "1", deadline: "1週間", description: "紙箱を組み立てる作業"}]));
                 setUserShifts(ls("knowbe_shifts", {}));
                 setStaffShifts(ls("knowbe_staff_shifts", {}));
+                setGlobalNotes(ls("knowbe_global_notes", ""));
             }, []);
 
             useEffect(() => { localStorage.setItem("knowbe_users", JSON.stringify(users)); }, [users]);
@@ -676,12 +815,77 @@
             useEffect(() => { localStorage.setItem("knowbe_tasks", JSON.stringify(tasks)); }, [tasks]);
             useEffect(() => { localStorage.setItem("knowbe_shifts", JSON.stringify(userShifts)); }, [userShifts]);
             useEffect(() => { localStorage.setItem("knowbe_staff_shifts", JSON.stringify(staffShifts)); }, [staffShifts]);
+            useEffect(() => { localStorage.setItem("knowbe_global_notes", JSON.stringify(globalNotes)); }, [globalNotes]);
 
             const handleUpdateUser = (d) => { const nd = { ...d, name: d.application.applicantName || d.name, status: determineStatus(d) }; setUsers(users.map(u => u.id === nd.id ? nd : u)); };
             const handleUserShiftUpdate = (date, uid, field, val) => { const dk = formatDateKey(date); const s = userShifts[dk] || {}; const cs = s[uid] || { checked: false, time: "10:00-15:00" }; let ns = { ...cs }; if (field === 'checked') { ns.checked = val; if(val && !ns.time) ns.time = "10:00-15:00"; } else { ns.time = val; if(val) ns.checked = true; } setUserShifts({ ...userShifts, [dk]: { ...s, [uid]: ns } }); };
             const handleStaffShiftUpdate = (date, sid, val) => { const dk = formatDateKey(date); const s = staffShifts[dk] || {}; setStaffShifts({ ...staffShifts, [dk]: { ...s, [sid]: { time: val, checked: !!val } } }); };
             const executeDelete = () => { if(deleteTarget){ setUsers(users.filter(u=>u.id!==deleteTarget.id)); setDeleteTarget(null); setView("list"); }};
             const currentUser = useMemo(() => users.find(u => u.id === activeUser), [users, activeUser]);
+
+            const handleGenerateGlobalNotes = async () => {
+                setIsGeneratingGlobal(true);
+                const apiKey = "";
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+                
+                const oneMonthAgo = new Date();
+                oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+                
+                let combinedText = "";
+                users.forEach(u => {
+                    let userRecords = [];
+                    (u.dailyRecords || []).forEach(r => {
+                        if (new Date(r.date) >= oneMonthAgo) {
+                            userRecords.push(`[${r.date} 支援記録] 体調:${r.condition} 内容:${r.content}`);
+                        }
+                    });
+                    (u.interviewRecords || []).forEach(r => {
+                        if (new Date(r.date) >= oneMonthAgo) {
+                            userRecords.push(`[${r.date} 面談記録] 内容:${r.content}`);
+                        }
+                    });
+                    if (userRecords.length > 0) {
+                        combinedText += `\n■ 利用者: ${u.name}\n` + userRecords.join('\n');
+                    }
+                });
+
+                if (!combinedText) {
+                    alert("直近1ヶ月の記録がありません。");
+                    setIsGeneratingGlobal(false);
+                    return;
+                }
+
+                if (combinedText.length > 15000) {
+                     combinedText = combinedText.substring(0, 15000) + "\n...（以降省略）";
+                }
+
+                const userQuery = `以下の障害福祉施設の全利用者の直近1ヶ月の支援記録・面談記録を元に、施設全体で共有すべき重要な連絡事項、引き継ぎ事項、注意が必要な利用者の変化などを要約してください。箇条書きで分かりやすくまとめてください。\n\n【記録一覧】\n${combinedText}`;
+                
+                const payload = {
+                    contents: [{ parts: [{ text: userQuery }] }],
+                    systemInstruction: { parts: [{ text: "あなたは障害福祉施設の経験豊富なサービス管理責任者です。事業所全体で共有すべき重要な連絡事項を、要点を絞って簡潔に作成します。" }] }
+                };
+
+                let retries = 5; let delay = 1000; let generatedText = "";
+                while (retries > 0) {
+                    try {
+                        const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+                        const result = await response.json();
+                        if (result.error) throw new Error(result.error.message);
+                        generatedText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                        break;
+                    } catch (e) {
+                        retries--;
+                        if (retries === 0) { alert("AIの生成に失敗しました。APIキーの有無などを確認してください。"); } 
+                        else { await new Promise(r => setTimeout(r, delay)); delay *= 2; }
+                    }
+                }
+                
+                if (generatedText) {
+                    setGlobalNotes(generatedText.trim());
+                }
+                setIsGeneratingGlobal(false);
+            };
 
             return (
                 <ErrorBoundary>
@@ -714,14 +918,34 @@
                         </header>
                         <main className="flex-1 p-6 overflow-y-auto">
                             {view === "list" && (
-                                <div className="max-w-6xl mx-auto animate-fade-in">
-                                    <div className="flex justify-between mb-6"><h1 className="text-2xl font-bold text-slate-800">利用者一覧</h1><button onClick={() => { const nu = { ...getInitialUserState(), id: Date.now() }; nu.status = determineStatus(nu); setUsers([...users, nu]); setActiveUser(nu.id); setView("detail"); }} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg flex items-center gap-2 shadow transition-colors"><Icon name="user-plus" size={18}/>新規登録</button></div>
-                                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                                <div className="max-w-6xl mx-auto animate-fade-in space-y-6">
+                                    <div className="flex justify-between items-end mb-2">
+                                        <h1 className="text-2xl font-bold text-slate-800">ダッシュボード</h1>
+                                        <button onClick={() => { const nu = { ...getInitialUserState(), id: Date.now() }; nu.status = determineStatus(nu); setUsers([...users, nu]); setActiveUser(nu.id); setView("detail"); }} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg flex items-center gap-2 shadow transition-colors"><Icon name="user-plus" size={18}/>新規登録</button>
+                                    </div>
+                                    
+                                    <Card title="事業所全体の連絡事項・トピックス（直近1ヶ月の記録より）" className="border-l-4 border-l-purple-500 bg-purple-50/20">
+                                        <div className="mb-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                                            <p className="text-sm text-slate-600">全利用者の直近1ヶ月の支援記録や面談記録から、施設全体で共有すべき重要な引き継ぎ事項をAIが自動抽出します。</p>
+                                            <button onClick={handleGenerateGlobalNotes} disabled={isGeneratingGlobal} className="bg-purple-600 text-white text-xs px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-purple-700 disabled:opacity-50 transition-colors shadow-sm font-bold shrink-0">
+                                                <Icon name="sparkles" size={16} />
+                                                {isGeneratingGlobal ? "AIが全体要約を生成中..." : "全利用者の記録からAIで要約を作成"}
+                                            </button>
+                                        </div>
+                                        <TextArea 
+                                            rows={8} 
+                                            value={globalNotes} 
+                                            onChange={e => setGlobalNotes(e.target.value)} 
+                                            placeholder="事業所全体での共有事項、引き継ぎ事項などを入力してください。（上のボタンからAIによる自動要約も可能です）" 
+                                        />
+                                    </Card>
+
+                                    <Card title="利用者一覧" className="!p-0 overflow-hidden border-l-4 border-l-blue-500">
                                         <table className="min-w-full divide-y divide-slate-200"><thead className="bg-slate-50"><tr><th className="px-6 py-4 text-left font-bold text-slate-600">氏名</th><th className="px-6 py-4 text-left font-bold text-slate-600">状態</th><th className="px-6 py-4 text-right font-bold text-slate-600">操作</th></tr></thead>
                                         <tbody className="divide-y divide-slate-100">{users.map(u => (<tr key={u.id} className="hover:bg-slate-50 transition-colors"><td className="px-6 py-4 font-bold text-slate-800 flex items-center gap-3"><div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-500 font-normal">{u.name.charAt(0)}</div>{u.name}</td><td className="px-6 py-4"><span className={`px-3 py-1 rounded-full text-xs font-bold ${u.status==='利用中'?'bg-green-100 text-green-700':u.status.includes('体験')?'bg-blue-100 text-blue-700':'bg-slate-100 text-slate-600'}`}>{u.status}</span></td><td className="px-6 py-4 text-right"><button onClick={() => {setActiveUser(u.id); setView("detail");}} className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded font-medium mr-2 transition-colors">編集・記録</button><button onClick={() => setDeleteTarget(u)} className="text-slate-400 hover:text-red-500 hover:bg-red-50 p-1.5 rounded transition-colors"><Icon name="trash-2" size={18} /></button></td></tr>))}
                                         {users.length === 0 && <tr><td colSpan="3" className="p-8 text-center text-slate-400">利用者が登録されていません</td></tr>}
                                         </tbody></table>
-                                    </div>
+                                    </Card>
                                 </div>
                             )}
                             {view === "schedule" && <StaffScheduleManager staffs={staffs} />}
@@ -750,13 +974,13 @@
                                         </nav>
                                     </div>
                                     <div className="pb-20">
-                                        {activeForm === 'summary' && <SummaryView user={currentUser} />}
+                                        {activeForm === 'summary' && <SummaryView user={currentUser} onChange={d => handleUpdateUser({...currentUser, ...d})} />}
                                         {activeForm === 'application' && <ApplicationForm data={currentUser.application} onChange={d => handleUpdateUser({...currentUser, application: d})} staffList={staffs} />}
                                         {activeForm === 'assessment' && <AssessmentForm data={currentUser.assessment} onChange={d => handleUpdateUser({...currentUser, assessment: d})} applicationData={currentUser.application} staffList={staffs} />}
                                         {activeForm === 'plan' && <PlanForm data={currentUser.plan} onChange={d => handleUpdateUser({...currentUser, plan: d})} applicationData={currentUser.application} staffList={staffs} />}
                                         {activeForm === 'monitoring' && <MonitoringForm data={currentUser.monitoring} onChange={d => handleUpdateUser({...currentUser, monitoring: d})} applicationData={currentUser.application} planData={currentUser.plan} staffList={staffs} />}
                                         {activeForm === 'termination' && <TerminationForm data={currentUser.termination} onChange={d => handleUpdateUser({...currentUser, termination: d})} applicationData={currentUser.application} planData={currentUser.plan} />}
-                                        {activeForm === 'daily' && <DailyRecordForm data={currentUser.dailyRecords || []} assessmentData={currentUser.assessment} onChange={d => handleUpdateUser({...currentUser, dailyRecords: d})} />}
+                                        {activeForm === 'daily' && <DailyRecordForm data={currentUser.dailyRecords || []} onChange={d => handleUpdateUser({...currentUser, dailyRecords: d})} />}
                                         {activeForm === 'interview' && <InterviewRecordForm data={currentUser.interviewRecords || []} staffList={staffs} onChange={d => handleUpdateUser({...currentUser, interviewRecords: d})} />}
                                     </div>
                                 </div>
