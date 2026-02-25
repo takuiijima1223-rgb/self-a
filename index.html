@@ -104,23 +104,6 @@
             return el ? createPortal(children, el) : null;
         };
 
-        const SimpleBarChart = ({ data }) => {
-            if (!data || data.length === 0) return <div className="h-full flex items-center justify-center text-slate-400 text-xs">データなし</div>;
-            const maxVal = Math.max(...data.map(d => d.users), 1);
-            return (
-                <div className="w-full h-full flex items-end gap-1 pt-4 pb-1 px-1 relative">
-                    {data.map((d, i) => (
-                        <div key={i} className="flex-1 flex flex-col items-center group relative h-full justify-end">
-                            <div className="w-full bg-blue-500 rounded-t hover:bg-blue-600 transition-all relative" style={{ height: `${(d.users / maxVal) * 100}%` }}>
-                                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-1 hidden group-hover:block bg-slate-800 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap z-10">{d.time} : {d.users}名</div>
-                            </div>
-                        </div>
-                    ))}
-                    <div className="absolute bottom-0 left-0 right-0 h-px bg-slate-200"></div>
-                </div>
-            );
-        };
-
         // --- ユーティリティ ---
         const checkDeadlineAlert = (targetDateStr, completedDateStr, label) => {
             if (!targetDateStr) return { isAlert: false, message: '', type: null };
@@ -144,7 +127,6 @@
 
         const determineStatus = (user) => {
             if (user.plan?.periodStart && user.plan?.periodEnd && user.plan?.approver) return "利用中";
-            // scheduleが存在しない場合も考慮して安全にアクセス
             const schedule = user.application?.schedule || {};
             if (schedule.trial1 || schedule.trial2 || schedule.trial3) return "体験利用中";
             if (user.application?.receptionDate && user.application?.applicantName) return "見学対応中";
@@ -162,59 +144,29 @@
                 const endTime = endH + (endM || 0) / 60;
                 let duration = endTime - startTime;
                 if (duration < 0) duration += 24;
-                if (duration > 6) duration -= 1; // 6時間超で1時間休憩
+                if (duration > 6) duration -= 1;
                 return Math.max(0, duration);
             } catch (e) { return 0; }
         };
-
-        const stripHtmlTags = (str) => str ? str.replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n').replace(/<[^>]*>/g, '') : '';
 
         // --- 初期データ生成関数 ---
         const getInitialUserState = () => ({
             id: null, name: "新規利用者", status: "未定", 
             application: { 
                 applicantName: "", applicantNameKana: "", gender: "", dob: "", age: "", address: "", phone: "", email: "", disabilityType: [], disabilityName: "", disabilityGrade: "", hasExperience: "", todayQuestion: "", visitReason: [], futureGoal: "", desiredService: [], concerns: [], goals: [], isVisitingHospital: "", hospitalName: "", consultedDoctor: "", howDidYouKnow: [], 
-                schedule: { 
-                    trial1: "", trial1Time: "", 
-                    trial2: "", trial2Time: "", 
-                    trial3: "", trial3Time: "", 
-                    certificateDate: "", contractDate: "" 
-                } 
+                schedule: { trial1: "", trial1Time: "", trial2: "", trial2Time: "", trial3: "", trial3Time: "", certificateDate: "", contractDate: "" } 
             },
             assessment: { createDate: "", writer: "", referrer: "", commuteMethod: "", emergencyContact: { name: "", relation: "", tel: "" }, certificates: { mental: { status: "", note: "" }, rehabilitation: { status: "", note: "" }, physical: { status: "", note: "" }, devDisability: { has: "", note: "" } }, financial: { pension: { has: "", note: "" }, welfare: { has: "", note: "" } }, medical: { hospital: "", diagnosis: "", medication: "", doctor: "", psw: "", visitFrequency: "" }, workHistory: [{ company: "", content: "", period: "", type: "", days: "", hours: "", salary: "", reason: "" }], likesDislikes: { work: "", person: "" }, onsetAge: "", diagnosisAge: "", hospitalizationHistory: "", medicalAdvice: "", medicationManagement: "", symptomStability: "", currentMentalState: "", triggers: "", coping: "", lifeSituation: "", familySituation: "", personality: "", upbringing: "", dailyLife: { wakeTime: "", sleepTime: "", commSkill: "", literacy: "", numeracy: "", strengths: "", challenges: "", concerns: "" }, familyStructure: [{ name: "", relation: "", age: "", note: "" }], checklist: { health: { physical: { score: 0, note: "" }, medication: { score: 0, note: "" }, diet: { score: 0, note: "" } }, daily: { rhythm: { score: 0, note: "" }, appearance: { score: 0, note: "" }, cleanliness: { score: 0, note: "" }, money: { score: 0, note: "" }, mobility: { score: 0, note: "" } }, social: { expression: { score: 0, note: "" }, communication: { score: 0, note: "" }, emotion: { score: 0, note: "" }, cooperation: { score: 0, note: "" } }, work: { understanding: { score: 0, note: "" }, intention: { score: 0, note: "" }, motivation: { score: 0, note: "" }, endurance: { score: 0, note: "" }, familySupport: { score: 0, note: "" } } }, basicHabits: { greeting: { has: false, note: "" }, reporting: { has: false, note: "" }, attendance: { has: false, note: "" }, discipline: { has: false, note: "" } }, desiredSupport: { items: [], detail: "" }, overallOpinion: { desiredWork: "", readiness: "", suitability: "", futureTasks: "", remarks: "" } },
             plan: { periodStart: "", periodEnd: "", monitoringDate: "", userDesire: "", familyDesire: "", needs: "", longTermGoal: "", shortTermGoal: "", supportContent: "", staff: "", approver: "", explainDate: "" },
             monitoring: { date: "", interviewer: "", location: "", currentStatus: "", needs: "", anxiety: "", satisfaction: "", futureTasks: "", feedback: "" },
             termination: { date: "", goals: [{ id: 1, target: "", achievement: "", overall: "", satisfaction: "", nextOpinion: "" }, { id: 2, target: "", achievement: "", overall: "", satisfaction: "", nextOpinion: "" }, { id: 3, target: "", achievement: "", overall: "", satisfaction: "", nextOpinion: "" }, { id: 4, target: "", achievement: "", overall: "", satisfaction: "", nextOpinion: "" }] },
-            dailyRecords: [], // 日々の支援記録
-            interviewRecords: [] // 面談記録
+            dailyRecords: [], interviewRecords: []
         });
 
-        // データを安全にマージする関数 (不足項目を補完)
         const mergeUserData = (loadedUser) => {
             const initial = getInitialUserState();
-            // 特にネストが深い application.schedule を重点的に補完
-            const mergedApplication = {
-                ...initial.application,
-                ...(loadedUser.application || {}),
-                schedule: {
-                    ...initial.application.schedule,
-                    ...((loadedUser.application && loadedUser.application.schedule) || {})
-                }
-            };
-
-            const mergedUser = {
-                ...initial,
-                ...loadedUser,
-                application: mergedApplication,
-                assessment: { ...initial.assessment, ...(loadedUser.assessment || {}) },
-                plan: { ...initial.plan, ...(loadedUser.plan || {}) },
-                monitoring: { ...initial.monitoring, ...(loadedUser.monitoring || {}) },
-                termination: { ...initial.termination, ...(loadedUser.termination || {}) },
-                dailyRecords: loadedUser.dailyRecords || [],
-                interviewRecords: loadedUser.interviewRecords || []
-            };
-            
-            // ステータス再計算
+            const mergedApplication = { ...initial.application, ...(loadedUser.application || {}), schedule: { ...initial.application.schedule, ...((loadedUser.application && loadedUser.application.schedule) || {}) } };
+            const mergedUser = { ...initial, ...loadedUser, application: mergedApplication, assessment: { ...initial.assessment, ...(loadedUser.assessment || {}) }, plan: { ...initial.plan, ...(loadedUser.plan || {}) }, monitoring: { ...initial.monitoring, ...(loadedUser.monitoring || {}) }, termination: { ...initial.termination, ...(loadedUser.termination || {}) }, dailyRecords: loadedUser.dailyRecords || [], interviewRecords: loadedUser.interviewRecords || [] };
             mergedUser.status = determineStatus(mergedUser);
             return mergedUser;
         };
@@ -226,15 +178,9 @@
                 <div className="p-6">{children}</div>
             </div>
         );
-        const InputGroup = ({ label, children, required }) => (
-            <div className="mb-4"><label className="block text-sm font-medium text-slate-600 mb-1">{label} {required && <span className="text-red-500">*</span>}</label>{children}</div>
-        );
-        const TextInput = ({ value, onChange, placeholder, type = "text", disabled, className = "", step }) => (
-            <input type={type} step={step} className={`w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${disabled ? "bg-slate-100 text-slate-500" : "bg-white border-slate-300"} ${className}`} value={value || ""} onChange={onChange} placeholder={placeholder} disabled={disabled} />
-        );
-        const TextArea = ({ value, onChange, rows = 3, placeholder, disabled, className = "" }) => (
-            <textarea className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${disabled ? "bg-slate-100 text-slate-500" : "bg-white border-slate-300"} ${className}`} rows={rows} value={value || ""} onChange={onChange} placeholder={placeholder} disabled={disabled} />
-        );
+        const InputGroup = ({ label, children, required }) => ( <div className="mb-4"><label className="block text-sm font-medium text-slate-600 mb-1">{label} {required && <span className="text-red-500">*</span>}</label>{children}</div> );
+        const TextInput = ({ value, onChange, placeholder, type = "text", disabled, className = "", step }) => ( <input type={type} step={step} className={`w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${disabled ? "bg-slate-100 text-slate-500" : "bg-white border-slate-300"} ${className}`} value={value || ""} onChange={onChange} placeholder={placeholder} disabled={disabled} /> );
+        const TextArea = ({ value, onChange, rows = 3, placeholder, disabled, className = "" }) => ( <textarea className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${disabled ? "bg-slate-100 text-slate-500" : "bg-white border-slate-300"} ${className}`} rows={rows} value={value || ""} onChange={onChange} placeholder={placeholder} disabled={disabled} /> );
         const StaffSelect = ({ value, onChange, options = [], placeholder = "選択", disabled }) => (
             <div className="relative">
                 <select className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm appearance-none bg-white ${disabled ? "bg-slate-100" : "bg-white border-slate-300"} pr-8`} value={value || ""} onChange={onChange} disabled={disabled}>
@@ -245,146 +191,14 @@
                 <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500"><Icon name="chevron-down" size={16} /></div>
             </div>
         );
-        const Checkbox = ({ label, checked, onChange, disabled }) => (
-            <label className={`flex items-center space-x-2 mr-4 mb-2 ${disabled ? 'opacity-60' : 'cursor-pointer'}`}>
-                <input type="checkbox" checked={checked} onChange={onChange} disabled={disabled} className="w-4 h-4 text-blue-600 rounded border-slate-300" />
-                <span className="text-sm text-slate-700">{label}</span>
-            </label>
-        );
-        const Radio = ({ label, name, value, checked, onChange }) => (
-            <label className="flex items-center space-x-2 cursor-pointer mr-4">
-                <input type="radio" name={name} value={value} checked={checked} onChange={onChange} className="w-4 h-4 text-blue-600 border-slate-300" />
-                <span className="text-sm text-slate-700">{label}</span>
-            </label>
-        );
+        const Checkbox = ({ label, checked, onChange, disabled }) => ( <label className={`flex items-center space-x-2 mr-4 mb-2 ${disabled ? 'opacity-60' : 'cursor-pointer'}`}><input type="checkbox" checked={checked} onChange={onChange} disabled={disabled} className="w-4 h-4 text-blue-600 rounded border-slate-300" /><span className="text-sm text-slate-700">{label}</span></label> );
+        const Radio = ({ label, name, value, checked, onChange }) => ( <label className="flex items-center space-x-2 cursor-pointer mr-4"><input type="radio" name={name} value={value} checked={checked} onChange={onChange} className="w-4 h-4 text-blue-600 border-slate-300" /><span className="text-sm text-slate-700">{label}</span></label> );
         const SectionHeader = ({ text }) => <h4 className="text-md font-bold text-slate-700 mt-6 mb-3 border-l-4 border-blue-500 pl-3">{text}</h4>;
-        const AutoFillDisplay = ({ label, value }) => (
-             <div className="mb-4"><label className="block text-xs font-bold text-blue-600 mb-1 flex items-center">{label} <span className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-[10px] font-normal">自動反映</span></label><div className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-700 min-h-[38px] flex items-center">{value || "（未入力）"}</div></div>
-        );
+        const AutoFillDisplay = ({ label, value }) => ( <div className="mb-4"><label className="block text-xs font-bold text-blue-600 mb-1 flex items-center">{label} <span className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-[10px] font-normal">自動反映</span></label><div className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-700 min-h-[38px] flex items-center">{value || "（未入力）"}</div></div> );
         const AlertBanner = ({ alert, dateLabel, date }) => {
             if (!alert || !alert.isAlert) return null;
-            return (
-                <div className={`mb-4 p-4 rounded-md border flex items-start gap-3 shadow-sm ${alert.type === 'danger' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-yellow-50 border-yellow-200 text-yellow-800'}`}>
-                    <Icon name="bell" className={`flex-shrink-0 ${alert.type === 'danger' ? 'text-red-500' : 'text-yellow-600'}`} />
-                    <div><div className="font-bold">期限の確認が必要です</div><div className="text-sm mt-1">{alert.message}（{dateLabel}: {date}）</div></div>
-                </div>
-            );
+            return ( <div className={`mb-4 p-4 rounded-md border flex items-start gap-3 shadow-sm ${alert.type === 'danger' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-yellow-50 border-yellow-200 text-yellow-800'}`}><Icon name="bell" className={`flex-shrink-0 ${alert.type === 'danger' ? 'text-red-500' : 'text-yellow-600'}`} /><div><div className="font-bold">期限の確認が必要です</div><div className="text-sm mt-1">{alert.message}（{dateLabel}: {date}）</div></div></div> );
         };
-
-        // --- モーダル・カレンダー系コンポーネント ---
-        const DatePickerModal = ({ isOpen, onClose, currentDate, onSelectDate }) => {
-            if(!isOpen) return null;
-            return (
-                <ModalPortal><div className="fixed inset-0 bg-black/30 z-[1000] flex items-center justify-center" onClick={onClose}>
-                    <div className="bg-white p-4 rounded shadow-lg" onClick={e=>e.stopPropagation()}>
-                        <input type="date" value={formatDateKey(currentDate)} onChange={e => { onSelectDate(new Date(e.target.value)); onClose(); }} />
-                    </div>
-                </div></ModalPortal>
-            );
-        };
-
-        const CreateEventModal = ({ isOpen, onClose, defaultStart, defaultResourceId, editingEvent, onSave, onDelete }) => {
-            const [form, setForm] = useState({ title: '', date: '', start: '09:00', end: '10:00' });
-            useEffect(() => {
-                if(isOpen) {
-                    if(editingEvent) {
-                        const s = new Date(editingEvent.start); const e = new Date(editingEvent.end);
-                        setForm({ title: editingEvent.title, date: formatDateKey(s), start: s.toTimeString().slice(0,5), end: e.toTimeString().slice(0,5) });
-                    } else {
-                        const d = new Date(defaultStart);
-                        setForm({ title: '', date: formatDateKey(d), start: d.toTimeString().slice(0,5), end: new Date(d.getTime()+3600000).toTimeString().slice(0,5) });
-                    }
-                }
-            }, [isOpen, editingEvent, defaultStart]);
-
-            if(!isOpen) return null;
-            const handleSubmit = () => {
-                onSave({
-                    id: editingEvent ? editingEvent.id : Date.now().toString(),
-                    resourceId: editingEvent ? editingEvent.resourceId : defaultResourceId,
-                    title: form.title,
-                    start: new Date(`${form.date}T${form.start}`).toISOString(),
-                    end: new Date(`${form.date}T${form.end}`).toISOString()
-                });
-                onClose();
-            };
-
-            return (
-                <ModalPortal><div className="fixed inset-0 bg-black/30 z-[1000] flex items-center justify-center">
-                    <div className="bg-white p-6 rounded w-96 space-y-4">
-                        <h3 className="font-bold text-lg">{editingEvent ? '予定編集' : '予定作成'}</h3>
-                        <input className="w-full border p-2 rounded" placeholder="タイトル" value={form.title} onChange={e=>setForm({...form, title:e.target.value})} />
-                        <input type="date" className="w-full border p-2 rounded" value={form.date} onChange={e=>setForm({...form, date:e.target.value})} />
-                        <div className="flex gap-2">
-                            <input type="time" className="w-full border p-2 rounded" value={form.start} onChange={e=>setForm({...form, start:e.target.value})} />
-                            <input type="time" className="w-full border p-2 rounded" value={form.end} onChange={e=>setForm({...form, end:e.target.value})} />
-                        </div>
-                        <div className="flex justify-end gap-2">
-                            {editingEvent && <button onClick={()=>{onDelete(editingEvent.id); onClose();}} className="text-red-500">削除</button>}
-                            <button onClick={onClose}>キャンセル</button>
-                            <button onClick={handleSubmit} className="bg-blue-500 text-white px-4 py-2 rounded">保存</button>
-                        </div>
-                    </div>
-                </div></ModalPortal>
-            );
-        };
-        
-        const SchedulerGrid = ({ viewMode, currentDate, resources, onEventClick, onCellClick, sidebarWidth }) => {
-            const days = useMemo(() => {
-                const d = new Date(currentDate);
-                if (viewMode === 'week') { d.setDate(d.getDate() - d.getDay()); return Array.from({length: 7}, (_, i) => { const t = new Date(d); t.setDate(t.getDate() + i); return t; }); }
-                return [new Date(d)];
-            }, [currentDate, viewMode]);
-            const startHour = 8; const hours = Array.from({ length: 13 }, (_, i) => i + startHour); 
-
-            return (
-                <div className="flex flex-col h-full overflow-hidden relative">
-                    <div className="flex-1 flex flex-col overflow-auto custom-scrollbar relative">
-                        <div className="flex border-b bg-gray-50 sticky top-0 z-[60] min-w-[1000px]">
-                            <div className="flex-shrink-0 border-r bg-gray-100 sticky left-0 z-[60] p-2 font-bold text-gray-500" style={{ width: sidebarWidth }}>
-                                {viewMode === 'day' && <span>{currentDate.getDate()} ({['日','月','火','水','木','金','土'][currentDate.getDay()]})</span>}
-                            </div>
-                            <div className="flex-1 flex">
-                                {viewMode === 'week' ? days.map((d, i) => <div key={i} className="flex-1 p-2 text-center text-sm border-r font-medium">{d.getDate()} ({['日','月','火','水','木','金','土'][d.getDay()]})</div>)
-                                : hours.map(h => <div key={h} className="flex-1 border-r py-2 text-center text-sm text-gray-500">{h}:00</div>)}
-                            </div>
-                        </div>
-                        <div className="min-w-[1000px] relative">
-                            {resources.map(res => (
-                                <div key={res.id} className="flex border-b min-h-[80px] hover:bg-gray-50">
-                                    <div className="flex-shrink-0 p-2 border-r bg-white sticky left-0 z-40" style={{ width: sidebarWidth }}>
-                                        <div className="font-bold text-sm">{res.name}</div><div className="text-xs text-gray-500">{res.role}</div>
-                                    </div>
-                                    <div className="flex-1 relative w-full">
-                                        {viewMode === 'week' ? (
-                                            <div className="flex h-full">{days.map((day, di) => (
-                                                <div key={di} className="flex-1 border-r h-full p-1 cursor-pointer hover:bg-blue-50/50" onClick={() => onCellClick(res.id, new Date(day.setHours(9,0,0,0)))}>
-                                                    {res.events.filter(e => new Date(e.start).getDate() === day.getDate()).map(e => (
-                                                        <div key={e.id} onClick={(ev) => {ev.stopPropagation(); onEventClick(e);}} className="bg-blue-500 text-white text-xs p-1 rounded mb-1 truncate">{e.title}</div>
-                                                    ))}
-                                                </div>
-                                            ))}</div>
-                                        ) : (
-                                            <div className="flex h-full relative">
-                                                {hours.map(h => <div key={h} className="flex-1 border-r h-full" />)}
-                                                {res.events.map(e => {
-                                                    const s = new Date(e.start); const en = new Date(e.end);
-                                                    const startH = s.getHours() + s.getMinutes()/60; const endH = en.getHours() + en.getMinutes()/60;
-                                                    if(endH < 8 || startH > 20) return null;
-                                                    const left = ((Math.max(startH, 8) - 8) / 13) * 100; const width = ((Math.min(endH, 21) - Math.max(startH, 8)) / 13) * 100;
-                                                    return <div key={e.id} onClick={(ev) => {ev.stopPropagation(); onEventClick(e);}} className="absolute top-1 bottom-1 bg-blue-500 text-white text-xs p-1 rounded truncate cursor-pointer" style={{left: `${left}%`, width: `${width}%`}}>{e.title}</div>
-                                                })}
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-            );
-        };
-
 
         // --- 要約情報ビュー ---
         const SummaryView = ({ user }) => {
@@ -392,9 +206,7 @@
             const monitoringAlert = checkDeadlineAlert(plan?.monitoringDate, monitoring?.date, "モニタリング");
             const terminationAlert = checkDeadlineAlert(plan?.periodEnd, termination?.date, "終了評価");
 
-            const InfoItem = ({ label, value, important = false }) => (
-                <div className="mb-3"><div className={`text-xs font-bold mb-1 ${important ? 'text-red-600' : 'text-slate-500'}`}>{label} {important && <span className="text-xs bg-red-100 text-red-600 px-1 rounded ml-1">重要</span>}</div><div className={`text-sm ${value ? 'text-slate-800' : 'text-slate-400 italic'}`}>{value || "（情報なし）"}</div></div>
-            );
+            const InfoItem = ({ label, value, important = false }) => ( <div className="mb-3"><div className={`text-xs font-bold mb-1 ${important ? 'text-red-600' : 'text-slate-500'}`}>{label} {important && <span className="text-xs bg-red-100 text-red-600 px-1 rounded ml-1">重要</span>}</div><div className={`text-sm ${value ? 'text-slate-800' : 'text-slate-400 italic'}`}>{value || "（情報なし）"}</div></div> );
 
             return (
                 <div className="animate-fade-in">
@@ -422,77 +234,34 @@
             );
         };
 
-        // --- 職員シフト表(月) (1画面縦並び対応版) ---
+        // --- 職員シフト表(月) ---
         const StaffMonthlyShift = ({ staffs, staffShifts, onShiftChange }) => {
             const [currentMonth, setCurrentMonth] = useState(new Date());
 
             const getDaysInMonth = (date) => {
-                const year = date.getFullYear();
-                const month = date.getMonth();
-                const days = [];
+                const year = date.getFullYear(); const month = date.getMonth(); const days = [];
                 const lastDay = new Date(year, month + 1, 0).getDate();
-                for (let i = 1; i <= lastDay; i++) {
-                    days.push(new Date(year, month, i));
-                }
+                for (let i = 1; i <= lastDay; i++) days.push(new Date(year, month, i));
                 return days;
             };
 
             const days = getDaysInMonth(currentMonth);
             const weekDays = ["日","月","火","水","木","金","土"];
-
-            const shiftOptions = [
-                { value: "", label: "休", color: "bg-slate-50 text-slate-400" },
-                { value: "09:00-18:00", label: "09:00-18:00", color: "bg-blue-100 text-blue-700" },
-                { value: "09:00-13:00", label: "09:00-13:00", color: "bg-green-100 text-green-700" },
-                { value: "13:00-18:00", label: "13:00-18:00", color: "bg-orange-100 text-orange-700" },
-                { value: "10:00-16:00", label: "10:00-16:00", color: "bg-purple-100 text-purple-700" },
-            ];
-
-            const getShiftColor = (time) => {
-                const opt = shiftOptions.find(o => o.value === time);
-                return opt ? opt.color : "bg-white text-gray-700 font-normal";
-            };
-
-            const calculateDailyTotal = (date) => {
-                const dateKey = formatDateKey(date);
-                let total = 0;
-                staffs.forEach(staff => { 
-                    const shift = (staffShifts[dateKey] && staffShifts[dateKey][staff.id]); 
-                    if (shift && shift.time) total += calculateWorkHours(shift.time); 
-                });
-                return total;
-            };
+            const shiftOptions = [ { value: "", label: "休", color: "bg-slate-50 text-slate-400" }, { value: "09:00-18:00", label: "09:00-18:00", color: "bg-blue-100 text-blue-700" }, { value: "09:00-13:00", label: "09:00-13:00", color: "bg-green-100 text-green-700" }, { value: "13:00-18:00", label: "13:00-18:00", color: "bg-orange-100 text-orange-700" }, { value: "10:00-16:00", label: "10:00-16:00", color: "bg-purple-100 text-purple-700" } ];
+            const getShiftColor = (time) => { const opt = shiftOptions.find(o => o.value === time); return opt ? opt.color : "bg-white text-gray-700 font-normal"; };
+            const calculateDailyTotal = (date) => { const dateKey = formatDateKey(date); let total = 0; staffs.forEach(staff => { const shift = (staffShifts[dateKey] && staffShifts[dateKey][staff.id]); if (shift && shift.time) total += calculateWorkHours(shift.time); }); return total; };
 
             const handleChange = (date, staffId, value) => {
                 if (value === "MANUAL_INPUT") {
-                    const dateKey = formatDateKey(date);
-                    const currentShift = (staffShifts[dateKey] && staffShifts[dateKey][staffId]);
-                    const defaultVal = currentShift ? currentShift.time : "";
-                    const input = prompt("シフト時間を入力してください (例: 09:30-17:30)", defaultVal);
-                    
-                    if (input !== null) {
-                        onShiftChange(date, staffId, input);
-                    } else {
-                        onShiftChange(date, staffId, defaultVal);
-                    }
-                } else {
-                    onShiftChange(date, staffId, value);
-                }
+                    const dateKey = formatDateKey(date); const currentShift = (staffShifts[dateKey] && staffShifts[dateKey][staffId]);
+                    const input = prompt("シフト時間を入力してください (例: 09:30-17:30)", currentShift ? currentShift.time : "");
+                    onShiftChange(date, staffId, input !== null ? input : (currentShift ? currentShift.time : ""));
+                } else { onShiftChange(date, staffId, value); }
             };
 
-            // 時間の縦表示用関数
             const renderTime = (time) => {
                 if (!time) return <span className="text-slate-400 font-normal">休</span>;
-                if (time.includes('-')) {
-                    const parts = time.split('-');
-                    return (
-                        <div className="flex flex-col items-center justify-center leading-tight">
-                            <span>{parts[0]}</span>
-                            <span className="text-[7px] my-[1px] opacity-50">|</span>
-                            <span>{parts[1]}</span>
-                        </div>
-                    );
-                }
+                if (time.includes('-')) { const parts = time.split('-'); return ( <div className="flex flex-col items-center justify-center leading-tight"><span>{parts[0]}</span><span className="text-[7px] my-[1px] opacity-50">|</span><span>{parts[1]}</span></div> ); }
                 return <span>{time}</span>;
             };
 
@@ -507,50 +276,25 @@
                             <button onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1))} className="p-1 hover:bg-slate-200 rounded"><Icon name="chevron-right" /></button>
                         </div>
                     </div>
-
                     <div className="bg-white border border-slate-200 rounded-lg overflow-x-auto shadow-sm w-full print:border-none print:shadow-none">
                         <table className="divide-y divide-slate-200 border-collapse table-fixed w-full" style={{ minWidth: '1000px' }}>
                             <thead className="bg-slate-50">
                                 <tr>
                                     <th className="p-1 text-left font-bold text-slate-500 sticky left-0 bg-slate-50 z-10 w-[80px] border-r border-b text-[11px] leading-tight">職員名</th>
-                                    {days.map(d => (
-                                        <th key={d.getDate()} className={`p-0 py-1 text-center font-bold border-r border-b text-[10px] leading-tight ${d.getDay()===0?'text-red-500 bg-red-50':d.getDay()===6?'text-blue-500 bg-blue-50':'text-slate-500'}`}>
-                                            {d.getDate()}<br/>{weekDays[d.getDay()]}
-                                        </th>
-                                    ))}
+                                    {days.map(d => ( <th key={d.getDate()} className={`p-0 py-1 text-center font-bold border-r border-b text-[10px] leading-tight ${d.getDay()===0?'text-red-500 bg-red-50':d.getDay()===6?'text-blue-500 bg-blue-50':'text-slate-500'}`}>{d.getDate()}<br/>{weekDays[d.getDay()]}</th> ))}
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-slate-200">
                                 {staffs.map(staff => (
                                     <tr key={staff.id} className="h-14">
-                                        <td className="p-1 font-medium text-slate-900 sticky left-0 bg-white z-10 border-r border-b text-[10px] truncate" title={`${staff.name} (${staff.role})`}>
-                                            <div className="truncate w-full">{staff.name}</div>
-                                            <div className="text-[8px] text-slate-400 font-normal truncate w-full">{staff.role}</div>
-                                        </td>
+                                        <td className="p-1 font-medium text-slate-900 sticky left-0 bg-white z-10 border-r border-b text-[10px] truncate" title={`${staff.name} (${staff.role})`}><div className="truncate w-full">{staff.name}</div><div className="text-[8px] text-slate-400 font-normal truncate w-full">{staff.role}</div></td>
                                         {days.map(date => {
-                                            const dateKey = formatDateKey(date);
-                                            const shift = (staffShifts[dateKey] && staffShifts[dateKey][staff.id]) || { time: "", checked: false };
-                                            const currentTime = shift.time;
-                                            
-                                            const isCustom = currentTime && !shiftOptions.some(o => o.value === currentTime);
-
+                                            const dateKey = formatDateKey(date); const shift = (staffShifts[dateKey] && staffShifts[dateKey][staff.id]) || { time: "", checked: false }; const currentTime = shift.time; const isCustom = currentTime && !shiftOptions.some(o => o.value === currentTime);
                                             return (
                                                 <td key={date.toISOString()} className={`p-0 border-r border-b relative group ${getShiftColor(currentTime)} hover:brightness-95 transition-all`}>
-                                                    {/* 表示用レイヤー */}
-                                                    <div className="absolute inset-0 flex flex-col items-center justify-center font-bold text-[9.5px] pointer-events-none">
-                                                        {renderTime(currentTime)}
-                                                    </div>
-                                                    
-                                                    {/* 入力用（透明） */}
-                                                    <select
-                                                        className="w-full h-full appearance-none focus:outline-none cursor-pointer opacity-0"
-                                                        value={currentTime}
-                                                        onChange={(e) => handleChange(date, staff.id, e.target.value)}
-                                                        title={currentTime || '休'}
-                                                    >
-                                                        {shiftOptions.map(opt => (
-                                                            <option key={opt.label} value={opt.value}>{opt.label}</option>
-                                                        ))}
+                                                    <div className="absolute inset-0 flex flex-col items-center justify-center font-bold text-[9.5px] pointer-events-none">{renderTime(currentTime)}</div>
+                                                    <select className="w-full h-full appearance-none focus:outline-none cursor-pointer opacity-0" value={currentTime} onChange={(e) => handleChange(date, staff.id, e.target.value)} title={currentTime || '休'}>
+                                                        {shiftOptions.map(opt => ( <option key={opt.label} value={opt.value}>{opt.label}</option> ))}
                                                         {isCustom && <option value={currentTime}>{currentTime}</option>}
                                                         <option value="MANUAL_INPUT">手動入力...</option>
                                                     </select>
@@ -559,15 +303,10 @@
                                         })}
                                     </tr>
                                 ))}
-                                {staffs.length === 0 && (
-                                    <tr><td colSpan={days.length + 1} className="px-6 py-4 text-center text-slate-400 text-xs">職員が登録されていません</td></tr>
-                                )}
+                                {staffs.length === 0 && ( <tr><td colSpan={days.length + 1} className="px-6 py-4 text-center text-slate-400 text-xs">職員が登録されていません</td></tr> )}
                             </tbody>
                             <tfoot className="bg-slate-100 font-bold text-slate-600">
-                                <tr className="h-8">
-                                    <td className="p-1 sticky left-0 bg-slate-100 z-10 border-r border-t text-[10px] whitespace-nowrap">稼働(h)</td>
-                                    {days.map(date => { const total = calculateDailyTotal(date); return (<td key={date.toISOString()} className="text-center p-0 border-r border-t text-[10px]">{total > 0 ? total : '-'}</td>); })}
-                                </tr>
+                                <tr className="h-8"><td className="p-1 sticky left-0 bg-slate-100 z-10 border-r border-t text-[10px] whitespace-nowrap">稼働(h)</td>{days.map(date => { const total = calculateDailyTotal(date); return (<td key={date.toISOString()} className="text-center p-0 border-r border-t text-[10px]">{total > 0 ? total : '-'}</td>); })}</tr>
                             </tfoot>
                         </table>
                     </div>
@@ -575,22 +314,12 @@
             );
         };
 
-        // --- 仮申込書フォーム (UI更新) ---
+        // --- 仮申込書フォーム ---
         const ApplicationForm = ({ data, onChange, staffList }) => {
             const update = (field, value) => onChange({ ...data, [field]: value });
-            // schedule内の特定のキーを更新するためのラッパー
-            const updateSchedule = (field, value) => onChange({ 
-                ...data, 
-                schedule: { ...data.schedule, [field]: value } 
-            });
+            const updateSchedule = (field, value) => onChange({ ...data, schedule: { ...data.schedule, [field]: value } });
             const handleCheckbox = (field, item) => { const current = data[field] || []; if (current.includes(item)) update(field, current.filter(i => i !== item)); else update(field, [...current, item]); };
-
-            // シフト時間の選択肢
-            const timeOptions = [
-                "10:00～11:00", "10:00～12:00", "10:00～14:00", "10:00～15:00",
-                "11:00～12:00", "11:00～14:00", "11:00～15:00",
-                "13:00～14:00", "13:00～15:00", "14:00～15:00"
-            ];
+            const timeOptions = [ "10:00～11:00", "10:00～12:00", "10:00～14:00", "10:00～15:00", "11:00～12:00", "11:00～14:00", "11:00～15:00", "13:00～14:00", "13:00～15:00", "14:00～15:00" ];
 
             return (
                 <div>
@@ -692,14 +421,7 @@
         };
 
         const DailyRecordForm = ({ data, assessmentData, onChange }) => {
-            const [form, setForm] = useState({
-                date: formatDateKey(new Date()),
-                condition: '普通',
-                temperature: '',
-                wakeTime: '',
-                sleepTime: '',
-                content: ''
-            });
+            const [form, setForm] = useState({ date: formatDateKey(new Date()), condition: '普通', temperature: '', wakeTime: '', sleepTime: '', content: '' });
             const [isGenerating, setIsGenerating] = useState(false);
 
             const handleGenerateAI = async () => {
@@ -707,25 +429,10 @@
                 const apiKey = "";
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
                 
-                const userQuery = `以下の情報を元に、本日の就労支援の「支援記録（職員が書く日報）」を150文字〜200文字程度で作成してください。客観的で丁寧な文体にしてください。
-        【本日の状況】
-        体調: ${form.condition}
-        体温: ${form.temperature ? form.temperature + '℃' : '未計測'}
-        起床: ${form.wakeTime || '不明'} / 就寝: ${form.sleepTime || '不明'}
-        【利用者の特性（アセスメント情報）】
-        得意なこと: ${assessmentData?.dailyLife?.strengths || '情報なし'}
-        苦手なこと: ${assessmentData?.dailyLife?.challenges || '情報なし'}
-        配慮事項: ${assessmentData?.triggers || '情報なし'}
-        `;
-                const payload = {
-                    contents: [{ parts: [{ text: userQuery }] }],
-                    systemInstruction: { parts: [{ text: "あなたは就労支援施設の経験豊富な支援員です。" }] }
-                };
+                const userQuery = `以下の情報を元に、本日の就労支援の「支援記録（職員が書く日報）」を150文字〜200文字程度で作成してください。客観的で丁寧な文体にしてください。\n【本日の状況】\n体調: ${form.condition}\n体温: ${form.temperature ? form.temperature + '℃' : '未計測'}\n起床: ${form.wakeTime || '不明'} / 就寝: ${form.sleepTime || '不明'}\n【利用者の特性（アセスメント情報）】\n得意なこと: ${assessmentData?.dailyLife?.strengths || '情報なし'}\n苦手なこと: ${assessmentData?.dailyLife?.challenges || '情報なし'}\n配慮事項: ${assessmentData?.triggers || '情報なし'}\n`;
+                const payload = { contents: [{ parts: [{ text: userQuery }] }], systemInstruction: { parts: [{ text: "あなたは就労支援施設の経験豊富な支援員です。" }] } };
 
-                let retries = 5;
-                let delay = 1000;
-                let generatedText = "";
-                
+                let retries = 5; let delay = 1000; let generatedText = "";
                 while (retries > 0) {
                     try {
                         const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -735,24 +442,15 @@
                         break;
                     } catch (e) {
                         retries--;
-                        if (retries === 0) {
-                            alert("AIの生成に失敗しました。\nAPIキーが設定されているか、または時間をおいて再度お試しください。");
-                        } else {
-                            await new Promise(r => setTimeout(r, delay));
-                            delay *= 2;
-                        }
+                        if (retries === 0) { alert("AIの生成に失敗しました。\nAPIキーが設定されているか、または時間をおいて再度お試しください。"); } 
+                        else { await new Promise(r => setTimeout(r, delay)); delay *= 2; }
                     }
                 }
-                
                 if(generatedText) setForm({...form, content: generatedText.trim()});
                 setIsGenerating(false);
             };
 
-            const addRecord = () => {
-                if(!form.date) return;
-                onChange([...data, { id: Date.now(), ...form }]);
-                setForm({...form, content: ''}); 
-            };
+            const addRecord = () => { if(!form.date) return; onChange([...data, { id: Date.now(), ...form }]); setForm({...form, content: ''}); };
 
             return (
                 <div className="space-y-6 animate-fade-in">
@@ -761,27 +459,15 @@
                             <InputGroup label="日付"><TextInput type="date" value={form.date} onChange={e=>setForm({...form, date:e.target.value})} /></InputGroup>
                             <InputGroup label="体調">
                                 <div className="relative">
-                                    <select className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white border-slate-300 appearance-none" value={form.condition} onChange={e=>setForm({...form, condition:e.target.value})}>
-                                        {['良好', '普通', '変化なし', 'やや不調', '不調'].map(c=><option key={c} value={c}>{c}</option>)}
-                                    </select>
+                                    <select className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white border-slate-300 appearance-none" value={form.condition} onChange={e=>setForm({...form, condition:e.target.value})}>{['良好', '普通', '変化なし', 'やや不調', '不調'].map(c=><option key={c} value={c}>{c}</option>)}</select>
                                     <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500"><Icon name="chevron-down" size={16} /></div>
                                 </div>
                             </InputGroup>
                             <InputGroup label="体温 (℃)"><TextInput type="number" step="0.1" value={form.temperature} onChange={e=>setForm({...form, temperature:e.target.value})} placeholder="例: 36.5" /></InputGroup>
-                            <InputGroup label="起床 / 就寝時間">
-                                <div className="flex gap-2">
-                                    <TextInput type="time" value={form.wakeTime} onChange={e=>setForm({...form, wakeTime:e.target.value})} title="起床時間" />
-                                    <TextInput type="time" value={form.sleepTime} onChange={e=>setForm({...form, sleepTime:e.target.value})} title="就寝時間" />
-                                </div>
-                            </InputGroup>
+                            <InputGroup label="起床 / 就寝時間"><div className="flex gap-2"><TextInput type="time" value={form.wakeTime} onChange={e=>setForm({...form, wakeTime:e.target.value})} title="起床時間" /><TextInput type="time" value={form.sleepTime} onChange={e=>setForm({...form, sleepTime:e.target.value})} title="就寝時間" /></div></InputGroup>
                         </div>
                         <InputGroup label="支援内容・様子">
-                            <div className="mb-2">
-                                <button onClick={handleGenerateAI} disabled={isGenerating} className="bg-purple-600 text-white text-xs px-3 py-1.5 rounded flex items-center gap-1 hover:bg-purple-700 disabled:opacity-50 transition-colors shadow-sm">
-                                    <Icon name="wand-2" size={14} />
-                                    {isGenerating ? "AIが文章を生成中..." : "AIで支援内容を自動作成"}
-                                </button>
-                            </div>
+                            <div className="mb-2"><button onClick={handleGenerateAI} disabled={isGenerating} className="bg-purple-600 text-white text-xs px-3 py-1.5 rounded flex items-center gap-1 hover:bg-purple-700 disabled:opacity-50 transition-colors shadow-sm"><Icon name="wand-2" size={14} />{isGenerating ? "AIが文章を生成中..." : "AIで支援内容を自動作成"}</button></div>
                             <TextArea rows={4} value={form.content} onChange={e=>setForm({...form, content:e.target.value})} placeholder="本日の様子や支援内容を入力してください。（AIで自動作成も可能です）" />
                         </InputGroup>
                         <div className="flex justify-end"><button onClick={addRecord} className="bg-blue-600 text-white px-6 py-2 rounded shadow-sm hover:bg-blue-700">記録を保存</button></div>
@@ -813,20 +499,12 @@
 
         const InterviewRecordForm = ({ data, staffList, onChange }) => {
             const [form, setForm] = useState({ date: formatDateKey(new Date()), interviewer: '', content: '' });
-
-            const addRecord = () => {
-                if(!form.date || !form.content) return;
-                onChange([...data, { id: Date.now(), ...form }]);
-                setForm({...form, content: ''});
-            };
+            const addRecord = () => { if(!form.date || !form.content) return; onChange([...data, { id: Date.now(), ...form }]); setForm({...form, content: ''}); };
 
             return (
                 <div className="space-y-6 animate-fade-in">
                     <Card title="新規面談記録">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                            <InputGroup label="面談日"><TextInput type="date" value={form.date} onChange={e=>setForm({...form, date:e.target.value})} /></InputGroup>
-                            <InputGroup label="対応スタッフ"><StaffSelect value={form.interviewer} onChange={e=>setForm({...form, interviewer:e.target.value})} options={staffList} /></InputGroup>
-                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4"><InputGroup label="面談日"><TextInput type="date" value={form.date} onChange={e=>setForm({...form, date:e.target.value})} /></InputGroup><InputGroup label="対応スタッフ"><StaffSelect value={form.interviewer} onChange={e=>setForm({...form, interviewer:e.target.value})} options={staffList} /></InputGroup></div>
                         <InputGroup label="面談内容" required><TextArea rows={4} value={form.content} onChange={e=>setForm({...form, content:e.target.value})} placeholder="面談で話した内容や決定事項を入力してください。" /></InputGroup>
                         <div className="flex justify-end"><button onClick={addRecord} className="bg-blue-600 text-white px-6 py-2 rounded shadow-sm hover:bg-blue-700">記録を保存</button></div>
                     </Card>
@@ -835,13 +513,7 @@
                         <div className="space-y-4">
                             {[...data].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(r => (
                                 <div key={r.id} className="p-4 border border-slate-200 rounded-lg bg-white relative group hover:border-blue-300 transition-colors">
-                                    <div className="flex justify-between items-start mb-2">
-                                        <div className="flex items-center gap-3">
-                                            <span className="font-bold text-blue-800">{r.date}</span>
-                                            <span className="text-sm bg-blue-50 px-2 py-0.5 rounded text-blue-700 flex items-center gap-1"><Icon name="user" size={12}/> {r.interviewer || '未設定'}</span>
-                                        </div>
-                                        <button onClick={()=>onChange(data.filter(x=>x.id!==r.id))} className="text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><Icon name="trash-2" size={16}/></button>
-                                    </div>
+                                    <div className="flex justify-between items-start mb-2"><div className="flex items-center gap-3"><span className="font-bold text-blue-800">{r.date}</span><span className="text-sm bg-blue-50 px-2 py-0.5 rounded text-blue-700 flex items-center gap-1"><Icon name="user" size={12}/> {r.interviewer || '未設定'}</span></div><button onClick={()=>onChange(data.filter(x=>x.id!==r.id))} className="text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><Icon name="trash-2" size={16}/></button></div>
                                     <div className="text-sm text-slate-700 whitespace-pre-wrap pl-3 border-l-2 border-slate-200 py-1">{r.content}</div>
                                 </div>
                             ))}
@@ -851,6 +523,16 @@
                 </div>
             );
         };
+
+        // --- エラー回避用の仮コンポーネント（ダミー） ---
+        // ※元のコードにこれらの中身がある場合は、そちらに差し替えてください。
+        const StaffScheduleManager = () => <div className="p-8 bg-white rounded shadow text-slate-500 text-center">スケジュール管理画面（コードが不足しています）</div>;
+        const SeatManagement = () => <div className="p-8 bg-white rounded shadow text-slate-500 text-center">座席配置画面（コードが不足しています）</div>;
+        const TaskManagement = () => <div className="p-8 bg-white rounded shadow text-slate-500 text-center">作業一覧画面（コードが不足しています）</div>;
+        const UserShiftManagement = () => <div className="p-8 bg-white rounded shadow text-slate-500 text-center">利用者シフト画面（コードが不足しています）</div>;
+        const StaffShiftManagement = () => <div className="p-8 bg-white rounded shadow text-slate-500 text-center">職員配置シミュレーション画面（コードが不足しています）</div>;
+        const StaffManagement = () => <div className="p-8 bg-white rounded shadow text-slate-500 text-center">職員情報画面（コードが不足しています）</div>;
+
 
         // --- メインアプリケーション ---
         const App = () => {
@@ -933,10 +615,7 @@
             const handleStaffShiftUpdate = (date, sid, val) => {
                 const k = formatDateKey(date);
                 const cur = staffShifts[k] || {};
-                const newShift = { 
-                    time: val, 
-                    checked: !!val 
-                };
+                const newShift = { time: val, checked: !!val };
                 const newShifts = { ...staffShifts, [k]: { ...cur, [sid]: newShift } };
                 setStaffShifts(newShifts);
             };
@@ -946,7 +625,6 @@
                 const dateKey = formatDateKey(date);
                 const currentDayShifts = userShifts[dateKey] || {};
                 const currentShift = currentDayShifts[userId] || { checked: false, time: "10:00-15:00" };
-                
                 let newShift = { ...currentShift };
 
                 if (field === 'checked') {
@@ -957,13 +635,7 @@
                     if (value) newShift.checked = true;
                 }
 
-                const newUserShifts = {
-                    ...userShifts,
-                    [dateKey]: {
-                        ...currentDayShifts,
-                        [userId]: newShift
-                    }
-                };
+                const newUserShifts = { ...userShifts, [dateKey]: { ...currentDayShifts, [userId]: newShift } };
                 setUserShifts(newUserShifts);
                 localStorage.setItem("knowbe_shifts", JSON.stringify(newUserShifts));
             };
